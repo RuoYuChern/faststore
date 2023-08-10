@@ -7,11 +7,22 @@ import (
 	"github.com/tao/faststore/api"
 )
 
+type tsdbWRCache struct {
+	size      uint32
+	cacheType int
+	dataType  string
+	impl      *fstTsdbImpl
+	addr      *BlockAddr
+	block     *Block
+}
+
 type tsdbAppender struct {
-	topRef   *BlockRefer
-	tailRef  *BlockRefer
-	impl     *fstTsdbImpl
-	lastRidx *TsdbRangIndex
+	topRef    *BlockAddr
+	impl      *fstTsdbImpl
+	lastRidx  *TsdbRangIndex
+	ridxCache *tsdbWRCache
+	idxCache  *tsdbWRCache
+	datCache  *tsdbWRCache
 }
 
 type fstTsdbImpl struct {
@@ -43,5 +54,7 @@ func (tsdb *fstTsdbImpl) GetBetween(low, high int64, limit int) (*list.List, err
 	return nil, nil
 }
 func (tsdb *fstTsdbImpl) Close() {
-
+	if tsdb.appender != nil {
+		tsdb.appender.close()
+	}
 }
