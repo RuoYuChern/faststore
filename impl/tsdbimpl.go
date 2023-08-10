@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"container/list"
 	"errors"
 	"fmt"
 	"os"
@@ -41,6 +42,7 @@ var (
 	gCache_VAL  = 3
 )
 
+// appender
 func (ta *tsdbAppender) append(value *api.FstTsdbValue) error {
 	err := ta.getTailRIdx()
 	if err != nil {
@@ -156,7 +158,7 @@ func (ta *tsdbAppender) getDataCache() error {
 		return err
 	}
 	idxAdr := &BlockAddr{SegNo: ta.lastRidx.Addr.SegNo, SegOffset: ta.lastRidx.Addr.SegOffset}
-	ta.idxCache = &tsdbWRCache{size: getTypeSize(gData_IDX), impl: ta.impl, addr: idxAdr, block: blk}
+	ta.idxCache = &tsdbWRCache{blkSize: getTypeSize(gData_IDX), impl: ta.impl, addr: idxAdr, block: blk}
 	idxItem := &TsdbIndex{}
 	err = idxItem.UnmarshalBinary(blk.Data[(blk.BH.Len - uint32(gTSDB_IDX_LEN)):])
 	if err != nil {
@@ -168,7 +170,7 @@ func (ta *tsdbAppender) getDataCache() error {
 	if err != nil {
 		return err
 	}
-	ta.datCache = &tsdbWRCache{size: getTypeSize(gData_VAL), impl: ta.impl, addr: datAddr, block: datBlk}
+	ta.datCache = &tsdbWRCache{blkSize: getTypeSize(gData_VAL), impl: ta.impl, addr: datAddr, block: datBlk}
 	return nil
 }
 
@@ -211,7 +213,7 @@ func (ta *tsdbAppender) getTailRIdx() error {
 			buf := make([]byte, gTSDB_RIDX_LEN)
 			bh := &block.BH
 			tailAdr := &BlockAddr{SegNo: addr.SegNo, SegOffset: addr.SegOffset}
-			ta.ridxCache = &tsdbWRCache{size: gBLK_RIDX_SIZE, impl: ta.impl, addr: tailAdr, block: block}
+			ta.ridxCache = &tsdbWRCache{blkSize: gBLK_RIDX_SIZE, impl: ta.impl, addr: tailAdr, block: block}
 			bcopy(buf, block.Data, 0, bh.Len-gTSDB_RIDX_LEN, gTSDB_RIDX_LEN)
 			ridx := &TsdbRangIndex{}
 			err = ridx.UnmarshalBinary(buf)
@@ -225,11 +227,89 @@ func (ta *tsdbAppender) getTailRIdx() error {
 	return nil
 }
 
+func (tQ *tsdbQuery) getLastN(key int64, limit int) (*list.List, error) {
+	err := tQ.findTidOff(key)
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+func (tq *tsdbQuery) getBetween(low, high int64, offset int) (*list.List, error) {
+	if tq.offset > offset {
+		common.Logger.Infof("offset = %d < lastOffset =%d", offset, tq.offset)
+		return nil, errors.New("offset error")
+	}
+	return nil, nil
+}
+
+func (tq *tsdbQuery) findTidOff(key int64) error {
+	if tq.ridxCache != nil {
+		return nil
+	}
+	if err := tq.findBlkRidx(key); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (tq *tsdbQuery) findBlkRidx(key int64) error {
+	topRef := &BlockAddr{}
+	err := getTsData(tq.impl.table, tq.impl.symbol, topRef)
+	if err != nil {
+		common.Logger.Infof("Get tsdata table=%s,symbol=%s failed:%s", tq.impl.table, tq.impl.symbol, err)
+		return err
+	}
+	block := &Block{}
+	addr := BlockAddr{SegNo: topRef.SegNo, SegOffset: topRef.SegOffset}
+	for {
+		if addr.SegNo == 0 {
+			break
+		}
+		err := loadBlock(&addr, tq.impl.dataDir, tq.impl.table, gData_RIDX, block)
+		if err != nil {
+			common.Logger.Infof("getBlock failed:%s", err)
+			return err
+		}
+		buf := make([]byte, gTSDB_RIDX_LEN)
+		first := &TsdbRangIndex{}
+		bcopy(buf, block.Data, 0, 0, gTSDB_RIDX_LEN)
+		err = first.UnmarshalBinary(buf)
+		if err != nil {
+			common.Logger.Infof("UnmarshalBinary first failed:%s", err)
+			return err
+		}
+		bcopy(buf, block.Data, 0, block.BH.Len-gTSDB_RIDX_LEN, gTSDB_RIDX_LEN)
+		tail := &TsdbRangIndex{}
+		err = tail.UnmarshalBinary(buf)
+		if err != nil {
+			common.Logger.Infof("UnmarshalBinary tail failed:%s", err)
+			return err
+		}
+		if key < int64(first.Low) {
+			return fmt.Errorf("key=%d < Low=%d", key, first.Low)
+		}
+		if key > int64(tail.High) {
+			addr.SegNo = block.BH.Next.SegNo
+			addr.SegOffset = block.BH.Next.SegOffset
+			continue
+		}
+		off := findRidxOff(block, uint64(key))
+		if off < 0 {
+			return fmt.Errorf("key=%d, off=%d is error", key, off)
+		}
+		tq.ridxCache = &tsdbRDCache{blkSize: gBLK_RIDX_SIZE, readOff: uint32(off), cacheType: gCache_RIDX, dataType: gData_RIDX, impl: tq.impl, block: block}
+		return nil
+	}
+	return errors.New("empty")
+}
+
+// tsdbWRCache
 func (ca *tsdbWRCache) updateTail(data *TsdbRangIndex) error {
 	totalLen := gTSDB_RIDX_LEN + ca.block.BH.Len + gBH_LEN
 	if data.Off == 0 {
 		data.Off = (ca.block.BH.Len / gTSDB_RIDX_LEN) + 1
-		if totalLen > uint32(ca.size) {
+		if totalLen > uint32(ca.blkSize) {
 			data.Off = 1
 			err := ca.changeCache()
 			if err != nil {
@@ -262,11 +342,11 @@ func (ca *tsdbWRCache) append(data FsData) (*BlockAddr, error) {
 	}
 
 	newLen := outLen + gBH_LEN
-	if newLen >= ca.size {
+	if newLen >= ca.blkSize {
 		return nil, errors.New("too long data")
 	}
 
-	if (ca.block.BH.Len + newLen) <= ca.size {
+	if (ca.block.BH.Len + newLen) <= ca.blkSize {
 		addr := ca.toCache(dLen, out)
 		return addr, nil
 	}
@@ -276,7 +356,7 @@ func (ca *tsdbWRCache) append(data FsData) (*BlockAddr, error) {
 		return nil, err
 	}
 
-	if (ca.block.BH.Len + newLen) <= ca.size {
+	if (ca.block.BH.Len + newLen) <= ca.blkSize {
 		addr := ca.toCache(dLen, out)
 		return addr, nil
 	}
@@ -321,6 +401,40 @@ func (ca *tsdbWRCache) close() error {
 	return nil
 }
 
+func findRidxOff(blk *Block, key uint64) int {
+	high := blk.BH.Len / gTSDB_RIDX_LEN
+	low := uint32(0)
+	oHigh := high
+	itemBuf := make([]byte, gTSDB_RIDX_LEN)
+	for low < high {
+		mid := (low + high) / 2
+		offset := mid * gTSDB_RIDX_LEN
+		bcopy(itemBuf, blk.Data, 0, offset, gTSDB_RIDX_LEN)
+		ridx := &TsdbRangIndex{}
+		err := ridx.UnmarshalBinary(itemBuf)
+		if err != nil {
+			common.Logger.Infof("UnmarshalBinary failed:%s", err)
+			return -1
+		}
+		if ridx.Low <= key && key <= ridx.High {
+			return int(offset)
+		}
+		if key < ridx.Low {
+			//小于左区间
+			high = mid
+		} else {
+			//大于右区间
+			low = mid + 1
+		}
+	}
+	if low >= oHigh {
+		common.Logger.Infof("some is unexceptions: low %d >= high %d", low, oHigh)
+	}
+	//这种情况下,low是最佳值
+	return int(low * gTSDB_RIDX_LEN)
+}
+
+// functions
 func allocBlockByType(datype string, pre *BlockAddr, impl *fstTsdbImpl) (*tsdbWRCache, error) {
 	ref, err := alloc(impl.dataDir, impl.table, datype)
 	if err != nil {
@@ -331,7 +445,7 @@ func allocBlockByType(datype string, pre *BlockAddr, impl *fstTsdbImpl) (*tsdbWR
 
 func newBlockCache(datype string, pre, ref *BlockAddr, impl *fstTsdbImpl) *tsdbWRCache {
 	dataSize := getTypeSize(datype)
-	cache := &tsdbWRCache{size: dataSize, dataType: datype, cacheType: getCacheType(datype), impl: impl}
+	cache := &tsdbWRCache{blkSize: dataSize, dataType: datype, cacheType: getCacheType(datype), impl: impl}
 	blk := &Block{BH: BlockHeader{}, Data: make([]byte, (dataSize - gBH_LEN))}
 	cache.block = blk
 	cache.addr = ref
@@ -364,6 +478,7 @@ func alloc(dir, table, datype string) (*BlockAddr, error) {
 			if err != nil {
 				return nil, err
 			}
+			common.Logger.Infof("Alloc segment=%d, offset=%d", newBa.SegNo, newBa.SegOffset)
 			return newBa, nil
 		} else {
 			//需要重新分配(segment)
@@ -371,6 +486,7 @@ func alloc(dir, table, datype string) (*BlockAddr, error) {
 			ba.AlocLen = uint32(datSize)
 			newBa.SegNo = ba.SegNo
 			newBa.SegOffset = 0
+			common.Logger.Infof("Alloc segment=%d, offset=%d", newBa.SegNo, newBa.SegOffset)
 		}
 	} else {
 		//第一块(segment)
@@ -378,6 +494,7 @@ func alloc(dir, table, datype string) (*BlockAddr, error) {
 		newBa.SegNo = ba.SegNo
 		newBa.SegOffset = 0
 		ba.AlocLen = uint32(datSize)
+		common.Logger.Infof("Alloc segment=%d, offset=%d", newBa.SegNo, newBa.SegOffset)
 	}
 	err = newSegment(ba.SegNo, dir, table, datype)
 	if err != nil {
@@ -410,6 +527,7 @@ func newSegment(blockNo uint32, dir, table, datype string) error {
 }
 
 func loadBlock(blk *BlockAddr, dir, table, datype string, data FsData) error {
+	common.Logger.Infof("loadBlock data=%s, segment=%d, segOff=%d", datype, blk.SegNo, blk.SegOffset)
 	name := fmt.Sprintf("%s/ftsdb/%s/%d_.%s", dir, table, blk.SegNo, datype)
 	fout, err := os.OpenFile(name, os.O_RDONLY, 0755)
 	if err != nil {
@@ -434,6 +552,7 @@ func loadBlock(blk *BlockAddr, dir, table, datype string, data FsData) error {
 }
 
 func saveBlock(blk *BlockAddr, dir, table, datype string, data FsData) error {
+	common.Logger.Infof("saveBlock data=%s, segment=%d, segOff=%d", datype, blk.SegNo, blk.SegOffset)
 	name := fmt.Sprintf("%s/ftsdb/%s/%d_.%s", dir, table, blk.SegNo, datype)
 	fout, err := os.OpenFile(name, os.O_WRONLY, 0755)
 	if err != nil {

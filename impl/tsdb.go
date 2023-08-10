@@ -8,11 +8,20 @@ import (
 )
 
 type tsdbWRCache struct {
-	size      uint32
+	blkSize   uint32
 	cacheType int
 	dataType  string
 	impl      *fstTsdbImpl
 	addr      *BlockAddr
+	block     *Block
+}
+
+type tsdbRDCache struct {
+	blkSize   uint32
+	readOff   uint32
+	cacheType int
+	dataType  string
+	impl      *fstTsdbImpl
 	block     *Block
 }
 
@@ -25,12 +34,22 @@ type tsdbAppender struct {
 	datCache  *tsdbWRCache
 }
 
+type tsdbQuery struct {
+	forward   bool
+	offset    int
+	impl      *fstTsdbImpl
+	ridxCache *tsdbRDCache
+	idxCache  *tsdbRDCache
+	datCache  *tsdbRDCache
+}
+
 type fstTsdbImpl struct {
 	api.FastStoreCall
 	table    string
 	dataDir  string
 	symbol   string
 	appender *tsdbAppender
+	query    *tsdbQuery
 }
 
 func NewTsdb(dir, table string, symbol string) *fstTsdbImpl {
@@ -48,10 +67,16 @@ func (tsdb *fstTsdbImpl) Append(value *api.FstTsdbValue) error {
 	return tsdb.appender.append(value)
 }
 func (tsdb *fstTsdbImpl) GetLastN(key int64, limit int) (*list.List, error) {
-	return nil, nil
+	if tsdb.query == nil {
+		tsdb.query = &tsdbQuery{forward: true, impl: tsdb}
+	}
+	return tsdb.query.getLastN(key, limit)
 }
-func (tsdb *fstTsdbImpl) GetBetween(low, high int64, limit int) (*list.List, error) {
-	return nil, nil
+func (tsdb *fstTsdbImpl) GetBetween(low, high int64, offset int) (*list.List, error) {
+	if tsdb.query == nil {
+		tsdb.query = &tsdbQuery{forward: false, offset: 0, impl: tsdb}
+	}
+	return tsdb.query.getBetween(low, high, offset)
 }
 func (tsdb *fstTsdbImpl) Close() {
 	if tsdb.appender != nil {

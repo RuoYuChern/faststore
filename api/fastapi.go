@@ -21,7 +21,7 @@ type FstTsdbCall interface {
 	Symbol() string
 	Append(value *FstTsdbValue) error
 	GetLastN(key int64, limit int) (*list.List, error)
-	GetBetween(low, high int64, limit int) (*list.List, error)
+	GetBetween(low, high int64, off int) (*list.List, error)
 	Close()
 }
 
