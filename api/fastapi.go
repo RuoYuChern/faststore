@@ -2,6 +2,8 @@ package api
 
 import "container/list"
 
+var DEF_LIMIT = 1000
+
 type FstTsdbValue struct {
 	Timestamp int64
 	Data      []byte
@@ -25,9 +27,16 @@ type FstTsdbCall interface {
 	Close()
 }
 
+type FstLogger interface {
+	Append(key string, value *FstTsdbValue) error
+	ForEach(call func(key string, value *FstTsdbValue)) error
+	Close()
+}
+
 type FastStoreCall interface {
 	Key() string
 	Save(data []byte) error
 	Append(data []byte) error
+	Read(data []byte) (int, error)
 	Close()
 }

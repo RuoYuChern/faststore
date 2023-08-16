@@ -15,6 +15,7 @@ var (
 	gBA_LEN        = uint32(8)
 	gBH_LEN        = uint32(20)
 	gBLK_V_H_LEN   = uint32(4)
+	gBLK_K_LEN     = 8
 	gTSDB_RIDX_LEN = uint32(28)
 	gTSDB_IDX_LEN  = uint32(16)
 )
@@ -59,6 +60,13 @@ type TsdbIndex struct {
 
 type TsdbValue struct {
 	FsData
+	Timestamp int64
+	Data      []byte
+}
+
+type TsdbLogValue struct {
+	FsData
+	Key       string
 	Timestamp int64
 	Data      []byte
 }
@@ -160,38 +168,88 @@ func (br *TsdbIndex) UnmarshalBinary(data []byte) error {
 
 func (br *TsdbValue) MarshalBinary() ([]byte, error) {
 	bLen := len(br.Data)
-	buf := make([]byte, (8 + bLen))
+	buf := make([]byte, (gBLK_K_LEN + bLen))
 	lwd := binary.LittleEndian
 	lwd.PutUint64(buf, uint64(br.Timestamp))
-	bcopy(buf, br.Data, 8, 0, uint32(bLen))
+	bcopy(buf, br.Data, uint32(gBLK_K_LEN), 0, uint32(bLen))
 	return buf, nil
 }
 
 func (br *TsdbValue) UnmarshalBinary(data []byte) error {
-	bLen := len(data) - 8
+	bLen := len(data) - gBLK_K_LEN
 	if bLen <= 0 {
 		return errors.New("out of range")
 	}
 	lwd := binary.LittleEndian
 	br.Timestamp = int64(lwd.Uint64(data))
 	br.Data = make([]byte, bLen)
-	bcopy(br.Data, data, 0, 8, uint32(bLen))
+	bcopy(br.Data, data, 0, uint32(gBLK_K_LEN), uint32(bLen))
+	return nil
+}
+
+func (br *TsdbValue) unmarshal(data []byte, dLen int) error {
+	bLen := dLen - gBLK_K_LEN
+	if bLen <= 0 {
+		return errors.New("out of range")
+	}
+	lwd := binary.LittleEndian
+	br.Timestamp = int64(lwd.Uint64(data))
+	br.Data = make([]byte, bLen)
+	bcopy(br.Data, data, 0, uint32(gBLK_K_LEN), uint32(bLen))
+	return nil
+}
+
+func (br *TsdbLogValue) MarshalBinary() ([]byte, error) {
+	bKey := []byte(br.Key)
+	kLen := uint32(len(bKey))
+	bLen := 4 + len(bKey) + 8 + len(br.Data)
+	outBuf := make([]byte, bLen)
+	//字符串长度
+	lwd := binary.LittleEndian
+	lwd.PutUint32(outBuf, kLen)
+	bcopy(outBuf, bKey, 4, 0, kLen)
+	dOff := 4 + kLen
+	lwd.PutUint64(outBuf[dOff:], uint64(br.Timestamp))
+	dOff += 8
+	bcopy(outBuf, br.Data, dOff, 0, uint32(len(br.Data)))
+	return outBuf, nil
+}
+
+func (br *TsdbLogValue) UnmarshalBinary(data []byte) error {
+	dLen := len(data)
+	if dLen <= 12 {
+		return errors.New("out of range")
+	}
+	lwd := binary.LittleEndian
+	kLen := lwd.Uint32(data)
+	if uint32(dLen) < (uint32(12) + kLen) {
+		return errors.New("out of range")
+	}
+	sOff := 4
+	br.Key = string(duplicate(data[sOff : sOff+int(kLen)]))
+	sOff += int(kLen)
+	br.Timestamp = int64(lwd.Uint64(data[sOff:]))
+	sOff += 8
+	if sOff >= dLen {
+		return errors.New("out of range")
+	}
+	br.Data = make([]byte, (dLen - sOff))
+	bcopy(br.Data, data, 0, uint32(sOff), uint32(dLen-sOff))
 	return nil
 }
 
 func (br *Block) MarshalBinary() ([]byte, error) {
 	bLen := len(br.Data)
-	buf := make([]byte, (int(gBH_LEN) + bLen))
-
+	outBuf := make([]byte, (int(gBH_LEN) + bLen))
 	bh := &br.BH
 	lwd := binary.LittleEndian
-	lwd.PutUint32(buf, bh.Pre.SegNo)
-	lwd.PutUint32(buf[4:], bh.Pre.SegOffset)
-	lwd.PutUint32(buf[12:], bh.Next.SegNo)
-	lwd.PutUint32(buf[16:], bh.Next.SegOffset)
-	lwd.PutUint32(buf[24:], bh.Len)
-	bcopy(buf, br.Data, gBH_LEN, 0, uint32(bLen))
-	return buf, nil
+	lwd.PutUint32(outBuf, bh.Pre.SegNo)
+	lwd.PutUint32(outBuf[4:], bh.Pre.SegOffset)
+	lwd.PutUint32(outBuf[8:], bh.Next.SegNo)
+	lwd.PutUint32(outBuf[12:], bh.Next.SegOffset)
+	lwd.PutUint32(outBuf[16:], bh.Len)
+	bcopy(outBuf, br.Data, gBH_LEN, 0, uint32(bLen))
+	return outBuf, nil
 }
 
 func (br *Block) UnmarshalBinary(data []byte) error {
@@ -199,11 +257,12 @@ func (br *Block) UnmarshalBinary(data []byte) error {
 	if bLen <= 0 {
 		return errors.New("out of range")
 	}
-	bh := &br.BH
-	err := bh.UnmarshalBinary(data)
-	if err != nil {
-		return nil
-	}
+	lwd := binary.LittleEndian
+	br.BH.Pre.SegNo = lwd.Uint32(data)
+	br.BH.Pre.SegOffset = lwd.Uint32(data[4:])
+	br.BH.Next.SegNo = lwd.Uint32(data[8:])
+	br.BH.Next.SegOffset = lwd.Uint32(data[12:])
+	br.BH.Len = lwd.Uint32(data[16:])
 	br.Data = make([]byte, bLen)
 	bcopy(br.Data, data, 0, gBH_LEN, uint32(bLen))
 	return nil
@@ -217,4 +276,16 @@ func PutIntToB(data []byte, u uint32) {
 func GetIntFromB(data []byte) uint32 {
 	lwd := binary.LittleEndian
 	return lwd.Uint32(data)
+}
+
+func getIdxSegOff(off uint32) uint32 {
+	return ((off / gBLK_IDX_SIZE) * gBLK_IDX_SIZE)
+}
+
+func getValueSegOff(off uint32) uint32 {
+	return ((off / gBLK_OBJ_SIZE) * gBLK_OBJ_SIZE)
+}
+
+func getValueBlkOff(off uint32) uint32 {
+	return (off % gBLK_OBJ_SIZE) - gBH_LEN
 }

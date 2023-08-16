@@ -21,6 +21,10 @@ func Stop() {
 	impl.StopDb()
 }
 
-func FsTsdbGet(table, target string) api.FstTsdbCall {
-	return impl.NewTsdb(conf.DataDir, table, target)
+func FsTsdbGet(table, key string) api.FstTsdbCall {
+	return impl.NewTsdb(conf.DataDir, table, key)
+}
+
+func FsTsdbLogGet(table string) api.FstLogger {
+	return nil
 }
