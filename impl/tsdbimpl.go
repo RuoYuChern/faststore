@@ -431,7 +431,7 @@ func (ca *tsdbRDCache) bachReadTo(start uint32, key uint64, item *list.List) err
 			break
 		}
 
-		bLen := GetIntFromB(ca.block.Data[off:])
+		bLen := getIntFromB(ca.block.Data[off:])
 		off += gBLK_V_H_LEN
 		if (bLen + off) > ca.block.BH.Len {
 			common.Logger.Infof("bLen=%d + readOf=%d > Len=%d", bLen, off, ca.block.BH.Len)
@@ -469,7 +469,7 @@ func (ca *tsdbRDCache) toPre() error {
 
 func (ca *tsdbRDCache) forward(data *TsdbValue) error {
 	if (ca.readOff + gBLK_V_H_LEN) < ca.block.BH.Len {
-		bLen := GetIntFromB(ca.block.Data[ca.readOff:])
+		bLen := getIntFromB(ca.block.Data[ca.readOff:])
 		ca.readOff += gBLK_V_H_LEN
 		if (bLen + ca.readOff) > ca.block.BH.Len {
 			common.Logger.Infof("bLen=%d + readOf=%d > Len=%d", bLen, ca.readOff, ca.block.BH.Len)
@@ -490,7 +490,7 @@ func (ca *tsdbRDCache) forward(data *TsdbValue) error {
 	}
 	ca.block = blk
 	ca.readOff = 0
-	bLen := GetIntFromB(ca.block.Data[ca.readOff:])
+	bLen := getIntFromB(ca.block.Data[ca.readOff:])
 	ca.readOff += gBLK_V_H_LEN
 	if (bLen + ca.readOff) > ca.block.BH.Len {
 		common.Logger.Infof("bLen=%d + readOf=%d > Len=%d", bLen, ca.readOff, ca.block.BH.Len)
@@ -578,7 +578,7 @@ func (ca *tsdbWRCache) changeCache() error {
 
 func (ca *tsdbWRCache) toCache(dLen uint32, out []byte) *BlockAddr {
 	if ca.cacheType == gCache_VAL {
-		PutIntToB(ca.block.Data[ca.block.BH.Len:], dLen)
+		putIntToB(ca.block.Data[ca.block.BH.Len:], dLen)
 		bcopy(ca.block.Data, out, ca.block.BH.Len+gBLK_V_H_LEN, 0, dLen)
 		dLen += gBLK_V_H_LEN
 	} else {
@@ -755,7 +755,7 @@ func allocWrCache(dataType string, impl *fstTsdbImpl, addr *BlockAddr, block *Bl
 func newSegment(blockNo uint32, dir, table, datype string) error {
 	os.MkdirAll(fmt.Sprintf(gTbl_Fmt, dir, table), 0755)
 	name := fmt.Sprintf(gSeg_Fmt, dir, table, blockNo, datype)
-	fout, err := os.OpenFile(name, os.O_CREATE, 0755)
+	fout, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0755)
 	if err != nil {
 		common.Logger.Infof("newSegment name=%s open failed:%s", name, err)
 		return err

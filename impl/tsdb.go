@@ -56,9 +56,11 @@ type fstLoggerImpl struct {
 	api.FstLogger
 	dir      string
 	table    string
+	tailName string
 	ios      *os.File
 	cache    []byte
 	cacheOff uint32
+	fileOff  uint32
 }
 
 type ftsdbEoff struct {

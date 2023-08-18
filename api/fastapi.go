@@ -29,7 +29,7 @@ type FstTsdbCall interface {
 
 type FstLogger interface {
 	Append(key string, value *FstTsdbValue) error
-	ForEach(call func(key string, value *FstTsdbValue)) error
+	ForEach(call func(key string, value *FstTsdbValue) error) error
 	Close()
 }
 

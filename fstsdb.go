@@ -26,5 +26,5 @@ func FsTsdbGet(table, key string) api.FstTsdbCall {
 }
 
 func FsTsdbLogGet(table string) api.FstLogger {
-	return nil
+	return impl.NewLogger(conf.DataDir, table)
 }

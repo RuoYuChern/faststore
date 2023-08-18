@@ -217,6 +217,10 @@ func (br *TsdbLogValue) MarshalBinary() ([]byte, error) {
 
 func (br *TsdbLogValue) UnmarshalBinary(data []byte) error {
 	dLen := len(data)
+	return br.unmarshal(data, dLen)
+}
+
+func (br *TsdbLogValue) unmarshal(data []byte, dLen int) error {
 	if dLen <= 12 {
 		return errors.New("out of range")
 	}
@@ -268,12 +272,12 @@ func (br *Block) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func PutIntToB(data []byte, u uint32) {
+func putIntToB(data []byte, u uint32) {
 	lwd := binary.LittleEndian
 	lwd.PutUint32(data, u)
 }
 
-func GetIntFromB(data []byte) uint32 {
+func getIntFromB(data []byte) uint32 {
 	lwd := binary.LittleEndian
 	return lwd.Uint32(data)
 }

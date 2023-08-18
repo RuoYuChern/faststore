@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"math/rand"
 	"time"
@@ -176,10 +177,51 @@ func testGn() {
 	call.Close()
 }
 
+func testLg() {
+	flg := faststore.FsTsdbLogGet("crpto")
+	flg.ForEach(func(key string, value *api.FstTsdbValue) error {
+		return nil
+	})
+	data := []byte("Hello world")
+	now := gNow
+	fval := api.FstTsdbValue{Timestamp: now, Data: data}
+	for off := 0; off < int(baiWan); off++ {
+		fval.Timestamp = now + int64(off)
+		err := flg.Append("btc_usd", &fval)
+		if err != nil {
+			break
+		}
+	}
+	flg.Close()
+	number := 0
+	off := 0
+	err := flg.ForEach(func(key string, value *api.FstTsdbValue) error {
+		number += 1
+		if off >= int(baiWan) {
+			off = 0
+		}
+		t := (now + int64(off))
+		if number <= 10 {
+			log.Printf("key:%s, timestamp=%d,data:%s", key, value.Timestamp, string(value.Data))
+		}
+		if key != "btc_usd" || !bytes.Equal(data, value.Data) || t != value.Timestamp {
+			log.Printf("Off:%d, key:%s, timestamp=%d != %d, data:%s", off, key, value.Timestamp, t, string(value.Data))
+			return errors.New("data error")
+		}
+		off += 1
+		return nil
+	})
+	flg.Close()
+	if err != nil {
+		log.Printf("ForEach error:%s", err)
+	}
+	log.Printf("number := %d, off:=%d", number, off)
+}
+
 func main() {
 	conf := api.TsdbConf{Level: "info", File: "../log/tao.log", MaxSize: 50, MaxBackups: 10, MaxAge: 1, Env: "dev", DataDir: "../data/fstore"}
 	faststore.Start(&conf)
-	c := 'm'
+	c := 'l'
 	switch c {
 	case 'w':
 		testWr()
@@ -191,6 +233,8 @@ func main() {
 		testGetRange()
 	case 'm':
 		testMGet()
+	case 'l':
+		testLg()
 	}
 	faststore.Stop()
 }
