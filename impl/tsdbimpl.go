@@ -805,9 +805,6 @@ func saveBlock(addr *BlockAddr, dir, table, datype string, data *Block) error {
 		common.Logger.Infof("saveBlock data=%s, segment=%d, segOff=%d", datype, addr.SegNo, addr.SegOffset)
 		return fmt.Errorf("offset=%d mod block size=%d =%d", addr.SegOffset, dsize, (addr.SegOffset % dsize))
 	}
-	if datype == gData_RIDX {
-		common.Logger.Infof("daty=%s, BH.Len=%d", datype, data.BH.Len)
-	}
 	name := fmt.Sprintf(gSeg_Fmt, dir, table, addr.SegNo, datype)
 	fout, err := os.OpenFile(name, os.O_WRONLY, 0755)
 	if err != nil {
