@@ -232,7 +232,6 @@ func (ta *tsdbAppender) getTailRIdx() error {
 				return err
 			}
 			ta.lastRidx = ridx
-			common.Logger.Infof("lastRidx:%+v", ta.lastRidx)
 			break
 		}
 	}
