@@ -7,6 +7,7 @@ import (
 )
 
 var conf *api.TsdbConf
+var version string = "v1.0.2"
 
 func Start(c *api.TsdbConf) error {
 	conf = c
@@ -27,4 +28,8 @@ func FsTsdbGet(table, key string) api.FstTsdbCall {
 
 func FsTsdbLogGet(table string) api.FstLogger {
 	return impl.NewLogger(conf.DataDir, table)
+}
+
+func GetVersion() string {
+	return version
 }
