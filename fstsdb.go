@@ -7,7 +7,7 @@ import (
 )
 
 var conf *api.TsdbConf
-var version string = "v1.0.2"
+var version string = "v1.0.3"
 
 func Start(c *api.TsdbConf) error {
 	conf = c
